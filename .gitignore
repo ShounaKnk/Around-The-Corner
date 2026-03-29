@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 .env
 .vscode
-events.json
+credentials.json
+token.json
