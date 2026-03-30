@@ -1,58 +1,15 @@
 import fastf1
 import pandas as pd
-import json, os
-import sys
+import os
+import shutil
 from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from datetime import datetime, timezone
-
+fastf1.set_log_level('ERROR')
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
-
-def delete_events_for_year(year):
-    service = get_calendar_service()
-
-    start_of_year = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
-    end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc).isoformat()
-
-    print(f"⚠️ Deleting all events for year {year}...")
-
-    page_token = None
-    deleted = 0
-
-    while True:
-        events_result = service.events().list(
-            calendarId='primary',
-            timeMin=start_of_year,
-            timeMax=end_of_year,
-            singleEvents=True,
-            orderBy='startTime',
-            pageToken=page_token
-        ).execute()
-
-        events = events_result.get('items', [])
-
-        for event in events:
-            try:
-                service.events().delete(
-                    calendarId='primary',
-                    eventId=event['id']
-                ).execute()
-
-                print(f"🗑 Deleted: {event.get('summary')}")
-                deleted += 1
-
-            except Exception as e:
-                print(f"❌ Failed to delete: {event.get('summary')}")
-                print("Error:", e)
-
-        page_token = events_result.get('nextPageToken')
-        if not page_token:
-            break
-
-    print(f"\n✅ Done! Deleted {deleted} events.")
 
 def normalize_time(dt_str):
     return datetime.fromisoformat(dt_str.replace("Z", "+00:00")).replace(microsecond=0)
@@ -153,26 +110,28 @@ def add_events_to_calendar(events, year):
 
 def get_calendar(year: int):
     schedule = fastf1.get_event_schedule(year)
-    calendar = schedule[["EventName", "EventFormat", "Session1", "Session1DateUtc", "Session2", "Session2DateUtc", "Session3", "Session3DateUtc", "Session4", "Session4DateUtc", "Session5", "Session5DateUtc"]]
-    race_calendar = calendar[calendar["EventFormat"].isin(["conventional", "sprint_qualifying"])]
-    racetimes = ["Session1DateUtc", "Session2DateUtc", "Session3DateUtc", "Session4DateUtc", "Session5DateUtc"]
-    race_calendar[racetimes] = race_calendar[racetimes].apply(
-        lambda col: col.dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
-    )
-    return race_calendar
+    if not schedule.empty:
+        calendar = schedule[["EventName", "EventFormat", "Session1", "Session1DateUtc", "Session2", "Session2DateUtc", "Session3", "Session3DateUtc", "Session4", "Session4DateUtc", "Session5", "Session5DateUtc"]]
+        race_calendar = calendar[calendar["EventFormat"].isin(["conventional", "sprint_qualifying"])]
+        racetimes = ["Session1DateUtc", "Session2DateUtc", "Session3DateUtc", "Session4DateUtc", "Session5DateUtc"]
+        race_calendar[racetimes] = race_calendar[racetimes].apply(
+            lambda col: col.dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
+        )
+        return race_calendar
+    return None
 
 def get_race_schedules(year):
-    RaceSchedules = {}
     race_calendar = get_calendar(year)
-    for index, race in race_calendar.iterrows():
-        RaceSchedules[race["EventName"]] = {
-                    f"{race["EventName"]} {race["Session1"]}": race["Session1DateUtc"],
-                    f"{race["EventName"]} {race["Session2"]}": race["Session2DateUtc"],
-                    f"{race["EventName"]} {race["Session3"]}": race["Session3DateUtc"],
-                    f"{race["EventName"]} {race["Session4"]}": race["Session4DateUtc"],
-                    f"{race["EventName"]} {race["Session5"]}": race["Session5DateUtc"]
-                }
-    
+    RaceSchedules = {}
+    if race_calendar is  not None and not race_calendar.empty:
+        for index, race in race_calendar.iterrows():
+            RaceSchedules[race["EventName"]] = {
+                        f"{race["EventName"]} {race["Session1"]}": race["Session1DateUtc"],
+                        f"{race["EventName"]} {race["Session2"]}": race["Session2DateUtc"],
+                        f"{race["EventName"]} {race["Session3"]}": race["Session3DateUtc"],
+                        f"{race["EventName"]} {race["Session4"]}": race["Session4DateUtc"],
+                        f"{race["EventName"]} {race["Session5"]}": race["Session5DateUtc"]
+                    }
     return RaceSchedules
 
 def create_event(race, raceTime, isMainEvent):
@@ -226,17 +185,58 @@ def remind_rerunnig_next_year(year):
 
 def add_race_schedule_to_calendar(year: int):
     race_schedule = get_race_schedules(year)
-    calendarEventList = []
-    for EventName, races in race_schedule.items():
-        grandPrix = create_event(EventName, races[f"{EventName} Practice 1"], isMainEvent=True)
-        calendarEventList.append(grandPrix)
-        for race, time in races.items():
-            RaceEvent = create_event(race=race, raceTime=time, isMainEvent=False)
-            calendarEventList.append(RaceEvent)
-    print(len(calendarEventList))
-    add_events_to_calendar(calendarEventList, year)
+    if  race_schedule:
+        calendarEventList = []
+        for EventName, races in race_schedule.items():
+            grandPrix = create_event(EventName, races[f"{EventName} Practice 1"], isMainEvent=True)
+            calendarEventList.append(grandPrix)
+            for race, time in races.items():
+                RaceEvent = create_event(race=race, raceTime=time, isMainEvent=False)
+                calendarEventList.append(RaceEvent)
+        print(len(calendarEventList))
+        add_events_to_calendar(calendarEventList, year)
+        return "Success"
+    return "Failed"
 
-inputYear = int(input("enter the year for which u want your F1 calendar: "))
-add_race_schedule_to_calendar(inputYear)
-# delete_events_for_year(inputYear)
-remind_rerunnig_next_year(inputYear)
+def printWelcomeMessage():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+    terminal_width, terminal_height = shutil.get_terminal_size()
+    message_lines = [
+        "========================================",
+        "          🏁 THE APEX AGENDA 🏁         ",
+        "    The F1 Google Calendar Auto-Sync    ",
+        "========================================",
+        "",
+        "Never miss FP1, Quali, or any Race Day again.",
+        "",
+        "Login with your Google Account synced with your calendar and allow access to calendar"
+    ]
+    vertical_padding = (terminal_height - len(message_lines)) // 2
+
+    for _ in range(max(0, vertical_padding)):
+        print()
+    for line in message_lines:
+        print(line.center(terminal_width))
+        
+    print("\n")
+
+printWelcomeMessage()
+max_attempts = 5
+for _ in range(max_attempts):
+    try:
+        inputYear = int(input("Enter F1 season year: "))
+    except ValueError:
+        print("Enter a valid year (number)")
+        continue
+    status = add_race_schedule_to_calendar(inputYear)
+    if status == "Failed":
+        print("---------------------------------------------------------------------------")
+        print(f"Schedule not released for {inputYear} season yet try for a different year")
+        print("---------------------------------------------------------------------------")
+        print("\n")
+    else:
+        remind_rerunnig_next_year(inputYear)
+        break
+else:
+    print("Too many failed attemps. Closing...")
