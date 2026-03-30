@@ -3,14 +3,56 @@ import pandas as pd
 import json, os
 import sys
 from datetime import datetime
-import time
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+def delete_events_for_year(year):
+    service = get_calendar_service()
+
+    start_of_year = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+    end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc).isoformat()
+
+    print(f"⚠️ Deleting all events for year {year}...")
+
+    page_token = None
+    deleted = 0
+
+    while True:
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=start_of_year,
+            timeMax=end_of_year,
+            singleEvents=True,
+            orderBy='startTime',
+            pageToken=page_token
+        ).execute()
+
+        events = events_result.get('items', [])
+
+        for event in events:
+            try:
+                service.events().delete(
+                    calendarId='primary',
+                    eventId=event['id']
+                ).execute()
+
+                print(f"🗑 Deleted: {event.get('summary')}")
+                deleted += 1
+
+            except Exception as e:
+                print(f"❌ Failed to delete: {event.get('summary')}")
+                print("Error:", e)
+
+        page_token = events_result.get('nextPageToken')
+        if not page_token:
+            break
+
+    print(f"\n✅ Done! Deleted {deleted} events.")
 
 def normalize_time(dt_str):
     return datetime.fromisoformat(dt_str.replace("Z", "+00:00")).replace(microsecond=0)
@@ -40,65 +82,73 @@ def get_calendar_service():
     service = build('calendar', 'v3', credentials=creds)
     return service
 
-def add_events_to_calendar(events):
+def add_events_to_calendar(events, year):
     service = get_calendar_service()
     batch_size = 50
     success = 0
     failed = 0
 
-    def get_existing_events():
+    def get_existing_events(service, year):
+        start_of_year = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
+        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc).isoformat()
+        
         result = service.events().list(
             calendarId='primary',
-            maxResults=250,
-            singleEvents=True
+            timeMin=start_of_year,
+            timeMax=end_of_year,
+            singleEvents=True,
+            orderBy='startTime'
         ).execute()
 
         existing = set()
         for e in result.get('items', []):
+            props = e.get('extendedProperties', {}).get('private', {})
+            if props.get('tag') != 'F1_EVENT':
+                continue
             start = e['start'].get('dateTime')
             summary = e.get('summary')
+
             if start and summary:
                 existing.add((summary, normalize_time(start)))
         return existing
 
-    existing_events = get_existing_events()
+    existing_events = get_existing_events(service, year)
+    filtered_events = []
+    for event in events:
+        key = (event['summary'], normalize_time(event['start']['dateTime']))
 
+        if key not in existing_events:
+            filtered_events.append(event)
+        else:
+            print(f"Skipping duplicate: {event['summary']}")
+            
+    print(f"\nTotal new events already existing: {len(existing_events)}")
+    print(f"\nTotal new events to add: {len(filtered_events)}")
+    
     def callback(request_id, response, exception):
-        nonlocal success, failed, existing_events
-
+        nonlocal success, failed
         if exception:
             print(f"Error: {exception}")
             failed += 1
         else:
-            summary = response.get('summary')
-            start = response['start'].get('dateTime')
-
-            print(f"✅ Added: {summary}")
+            print(f"Added: {response.get('summary')}")
             success += 1
-
-            existing_events.add((summary, normalize_time(start)))
-
-    for i in range(0, len(events), batch_size):
+    
+    for i in range(0, len(filtered_events), batch_size):
         batch = service.new_batch_http_request()
-        chunk = events[i:i + batch_size]
+        chunk = filtered_events[i:i + batch_size]
 
         for event in chunk:
-            key = (event['summary'], normalize_time(event['start']['dateTime']))
+            batch.add(
+                service.events().insert(
+                    calendarId='primary',
+                    body=event
+                ),
+                callback=callback
+            )
 
-            if key not in existing_events:
-                batch.add(
-                    service.events().insert(
-                        calendarId='primary',
-                        body=event
-                    ),
-                    callback=callback
-                )
-            else:
-                print(f"Skipping duplicate: {event['summary']}")
-
-        if batch._requests:
-            batch.execute()
-            print(f"Batch {i//batch_size + 1} completed")
+        batch.execute()
+        print(f"Batch {i//batch_size + 1} completed")
 
     print("\nDone!")
     print(f"Success: {success}")
@@ -147,7 +197,12 @@ def create_event(race, raceTime, isMainEvent):
                 'dateTime': (raceTime + pd.Timedelta(hours=2)).isoformat(),
                 'timeZone': 'Asia/Kolkata'
             },
-        'reminders': reminders
+        'reminders': reminders,
+        'extendedProperties': {
+            'private': {
+                'tag': 'F1_EVENT'
+            }
+        }
     }
     return event
 
@@ -161,7 +216,8 @@ def add_race_schedule_to_calendar(year: int):
             RaceEvent = create_event(race=race, raceTime=time, isMainEvent=False)
             calendarEventList.append(RaceEvent)
     print(len(calendarEventList))
-    add_events_to_calendar(calendarEventList)
+    add_events_to_calendar(calendarEventList, year)
 
 inputYear = int(input("enter the year for which u want your F1 calendar: "))
 add_race_schedule_to_calendar(inputYear)
+# delete_events_for_year(2026)
