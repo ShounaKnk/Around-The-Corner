@@ -90,7 +90,7 @@ def add_events_to_calendar(events, year):
 
     def get_existing_events(service, year):
         start_of_year = datetime(year, 1, 1, tzinfo=timezone.utc).isoformat()
-        end_of_year = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc).isoformat()
+        end_of_year = datetime(year+1, 1, 3, 23, 59, 59, tzinfo=timezone.utc).isoformat()
         
         result = service.events().list(
             calendarId='primary',
@@ -113,17 +113,14 @@ def add_events_to_calendar(events, year):
         return existing
 
     existing_events = get_existing_events(service, year)
-    filtered_events = []
+    new_events = []
     for event in events:
         key = (event['summary'], normalize_time(event['start']['dateTime']))
 
         if key not in existing_events:
-            filtered_events.append(event)
+            new_events.append(event)
         else:
             print(f"Skipping duplicate: {event['summary']}")
-            
-    print(f"\nTotal new events already existing: {len(existing_events)}")
-    print(f"\nTotal new events to add: {len(filtered_events)}")
     
     def callback(request_id, response, exception):
         nonlocal success, failed
@@ -134,9 +131,9 @@ def add_events_to_calendar(events, year):
             print(f"Added: {response.get('summary')}")
             success += 1
     
-    for i in range(0, len(filtered_events), batch_size):
+    for i in range(0, len(new_events), batch_size):
         batch = service.new_batch_http_request()
-        chunk = filtered_events[i:i + batch_size]
+        chunk = new_events[i:i + batch_size]
 
         for event in chunk:
             batch.add(
@@ -169,11 +166,11 @@ def get_race_schedules(year):
     race_calendar = get_calendar(year)
     for index, race in race_calendar.iterrows():
         RaceSchedules[race["EventName"]] = {
-                    race["Session1"]: race["Session1DateUtc"],
-                    race["Session2"]: race["Session2DateUtc"],
-                    race["Session3"]: race["Session3DateUtc"],
-                    race["Session4"]: race["Session4DateUtc"],
-                    race["Session5"]: race["Session5DateUtc"]
+                    f"{race["EventName"]} {race["Session1"]}": race["Session1DateUtc"],
+                    f"{race["EventName"]} {race["Session2"]}": race["Session2DateUtc"],
+                    f"{race["EventName"]} {race["Session3"]}": race["Session3DateUtc"],
+                    f"{race["EventName"]} {race["Session4"]}": race["Session4DateUtc"],
+                    f"{race["EventName"]} {race["Session5"]}": race["Session5DateUtc"]
                 }
     
     return RaceSchedules
@@ -206,11 +203,32 @@ def create_event(race, raceTime, isMainEvent):
     }
     return event
 
+def remind_rerunnig_next_year(year):
+    event = [{
+        'summary': "Buckle Up F1 weekends this year. Use It's-Race-Week to schedule F1 races on your Google Calendar.",
+        'start': {
+            'dateTime': f'{year+1}-01-03T13:00:00',
+            'timeZone': 'Asia/Kolkata',
+        },
+        'end': {
+            'dateTime': f'{year+1}-01-03T18:00:00',
+            'timeZone': 'Asia/Kolkata',
+        },
+        'recurrence': [
+            'RRULE:FREQ=YEARLY'
+        ],'extendedProperties': {
+            'private': {
+                'tag': 'F1_EVENT'
+            }
+        }
+    }]
+    add_events_to_calendar(event, year+1)
+
 def add_race_schedule_to_calendar(year: int):
     race_schedule = get_race_schedules(year)
     calendarEventList = []
     for EventName, races in race_schedule.items():
-        grandPrix = create_event(EventName, races["Practice 1"], isMainEvent=True)
+        grandPrix = create_event(EventName, races[f"{EventName} Practice 1"], isMainEvent=True)
         calendarEventList.append(grandPrix)
         for race, time in races.items():
             RaceEvent = create_event(race=race, raceTime=time, isMainEvent=False)
@@ -220,4 +238,5 @@ def add_race_schedule_to_calendar(year: int):
 
 inputYear = int(input("enter the year for which u want your F1 calendar: "))
 add_race_schedule_to_calendar(inputYear)
-# delete_events_for_year(2026)
+# delete_events_for_year(inputYear)
+remind_rerunnig_next_year(inputYear)
