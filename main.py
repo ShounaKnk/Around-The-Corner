@@ -103,16 +103,13 @@ def add_events_to_calendar(events, year):
 
         batch.execute()
         print(f"Batch {i//batch_size + 1} completed")
-
-    print("\nDone!")
-    print(f"Success: {success}")
-    print(f"Failed: {failed}")
+    print(f"\nDone! Success: {success} Failed: {failed}")
 
 def get_calendar(year: int):
     schedule = fastf1.get_event_schedule(year)
     if not schedule.empty:
         calendar = schedule[["EventName", "EventFormat", "Session1", "Session1DateUtc", "Session2", "Session2DateUtc", "Session3", "Session3DateUtc", "Session4", "Session4DateUtc", "Session5", "Session5DateUtc"]]
-        race_calendar = calendar[calendar["EventFormat"].isin(["conventional", "sprint_qualifying"])]
+        race_calendar = calendar[calendar["EventFormat"].isin(["conventional", "sprint_qualifying"])].copy()
         racetimes = ["Session1DateUtc", "Session2DateUtc", "Session3DateUtc", "Session4DateUtc", "Session5DateUtc"]
         race_calendar[racetimes] = race_calendar[racetimes].apply(
             lambda col: col.dt.tz_localize('UTC').dt.tz_convert('Asia/Kolkata')
@@ -164,7 +161,7 @@ def create_event(race, raceTime, isMainEvent):
 
 def remind_rerunnig_next_year(year):
     event = [{
-        'summary': "Buckle Up F1 weekends this year. Use It's-Race-Week to schedule F1 races on your Google Calendar.",
+        'summary': "Buckle Up for F1 weekends this year. Use It's-Race-Week to schedule F1 races on your Google Calendar.",
         'start': {
             'dateTime': f'{year+1}-01-03T13:00:00',
             'timeZone': 'Asia/Kolkata',
@@ -193,7 +190,6 @@ def add_race_schedule_to_calendar(year: int):
             for race, time in races.items():
                 RaceEvent = create_event(race=race, raceTime=time, isMainEvent=False)
                 calendarEventList.append(RaceEvent)
-        print(len(calendarEventList))
         add_events_to_calendar(calendarEventList, year)
         return "Success"
     return "Failed"
@@ -204,13 +200,13 @@ def printWelcomeMessage():
     terminal_width, terminal_height = shutil.get_terminal_size()
     message_lines = [
         "========================================",
-        "          🏁 THE APEX AGENDA 🏁         ",
+        "          🏁 Around The Corner 🏁         ",
         "    The F1 Google Calendar Auto-Sync    ",
         "========================================",
         "",
         "Never miss FP1, Quali, or any Race Day again.",
         "",
-        "Login with your Google Account synced with your calendar and allow access to calendar"
+        "Login with your Google Account that is synced with your calendar and allow access to calendar"
     ]
     vertical_padding = (terminal_height - len(message_lines)) // 2
 
@@ -222,10 +218,15 @@ def printWelcomeMessage():
     print("\n")
 
 printWelcomeMessage()
+inputMessage = "Enter F1 season year: "
 max_attempts = 5
+terminal_width, terminal_height = shutil.get_terminal_size()
+left_padding = ((terminal_width - len(inputMessage)) // 2)-3
 for _ in range(max_attempts):
     try:
-        inputYear = int(input("Enter F1 season year: "))
+        centered_prompt = (" " * left_padding) + inputMessage
+        inputYear = int(input(centered_prompt))
+        print("\n"+"-"*terminal_width+"\n")
     except ValueError:
         print("Enter a valid year (number)")
         continue
@@ -237,6 +238,12 @@ for _ in range(max_attempts):
         print("\n")
     else:
         remind_rerunnig_next_year(inputYear)
+        print("\n"+"-"*terminal_width+"\n")
+        
+        inputMessage = "You Are All Set for the Season!! Press Enter to close...\n\n"
+        left_padding = ((terminal_width - len(inputMessage)) // 2)
+        centered_prompt = (" " * left_padding) + inputMessage
+        inputYear = input(centered_prompt)
         break
 else:
     print("Too many failed attemps. Closing...")
