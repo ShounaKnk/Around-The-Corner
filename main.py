@@ -1,3 +1,4 @@
+#...we came in
 import fastf1
 import pandas as pd
 import os
@@ -247,3 +248,4 @@ for _ in range(max_attempts):
         break
 else:
     print("Too many failed attemps. Closing...")
+#isn't this where...
